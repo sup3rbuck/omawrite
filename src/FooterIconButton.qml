@@ -54,6 +54,14 @@ Item {
                 context.lineTo(4.5, 9.5);
                 context.lineTo(11.5, 9.5);
                 context.lineTo(11.5, 13.5);
+            } else if (control.iconName === "minus") {
+                context.moveTo(3.5, 8);
+                context.lineTo(12.5, 8);
+            } else if (control.iconName === "plus") {
+                context.moveTo(3.5, 8);
+                context.lineTo(12.5, 8);
+                context.moveTo(8, 3.5);
+                context.lineTo(8, 12.5);
             } else {
                 context.moveTo(2.5, 13);
                 context.lineTo(2.5, 3.5);

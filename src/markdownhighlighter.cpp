@@ -40,6 +40,11 @@ void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart)
     rehighlight();
 }
 
+void MarkdownHighlighter::refreshFormats() {
+    rebuildFormats();
+    rehighlight();
+}
+
 void MarkdownHighlighter::rebuildFormats() {
     const QColor marker = m_darkMode ? QColor(QStringLiteral("#4f525a"))
                                      : QColor(QStringLiteral("#aeb1b5"));

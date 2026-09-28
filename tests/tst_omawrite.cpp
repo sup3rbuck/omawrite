@@ -1,9 +1,13 @@
 #include <QtTest>
+#include <QAbstractTextDocumentLayout>
 #include <QFont>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QQuickTextDocument>
+#include <QSettings>
+#include <QTextDocument>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
@@ -182,6 +186,9 @@ private slots:
         QObject *openButton = window->findChild<QObject *>(QStringLiteral("openButton"));
         QVERIFY(saveButton);
         QVERIFY(openButton);
+        QVERIFY(window->findChild<QObject *>(QStringLiteral("decreaseFontButton")));
+        QVERIFY(window->findChild<QObject *>(QStringLiteral("increaseFontButton")));
+        QVERIFY(window->findChild<QObject *>(QStringLiteral("editorFontSizeLabel")));
 
         QSignalSpy saveDialogSpy(&backend, &Backend::saveDialogRequested);
         QVERIFY(QMetaObject::invokeMethod(saveButton, "clicked"));
@@ -206,6 +213,7 @@ private slots:
 
         QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
         QVERIFY(editor);
+        QCOMPARE(backend.editorFontSize(), 20);
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 20);
 
         // `omarchy display text size 16` sets the GNOME factor to 16/12.
@@ -216,6 +224,109 @@ private slots:
         backend.setTextScale(9.0 / 12.0);
         QCOMPARE(window->property("editorFontPixelSize").toInt(), 15);
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 15);
+    }
+
+    void remembersEditorFontSizeIndependentlyOfDesktopScale() {
+        Backend writer;
+        QCOMPARE(writer.editorFontSize(), 20);
+        writer.setEditorFontSize(24);
+        QCOMPARE(writer.editorFontSize(), 24);
+
+        Backend reopened;
+        QCOMPARE(reopened.editorFontSize(), 24);
+
+        writer.adjustEditorFontSize(-1);
+        QCOMPARE(writer.editorFontSize(), 23);
+        writer.setEditorFontSize(3);
+        QCOMPARE(writer.editorFontSize(), 10);
+        writer.adjustEditorFontSize(-1);
+        QCOMPARE(writer.editorFontSize(), 10);
+        writer.setEditorFontSize(200);
+        QCOMPARE(writer.editorFontSize(), 48);
+        writer.adjustEditorFontSize(1);
+        QCOMPARE(writer.editorFontSize(), 48);
+
+        writer.setEditorFontSize(20);
+        QCOMPARE(Backend().editorFontSize(), 20);
+    }
+
+    void footerFontButtonsChangeOnlyEditorText() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        backend.setEditorFontSize(20);
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *decrease = window->findChild<QObject *>(QStringLiteral("decreaseFontButton"));
+        QObject *increase = window->findChild<QObject *>(QStringLiteral("increaseFontButton"));
+        QObject *sizeLabel = window->findChild<QObject *>(QStringLiteral("editorFontSizeLabel"));
+        QVERIFY(editor);
+        QVERIFY(decrease);
+        QVERIFY(increase);
+        QVERIFY(sizeLabel);
+
+        QVERIFY(QMetaObject::invokeMethod(increase, "clicked"));
+        QCOMPARE(backend.editorFontSize(), 21);
+        QCOMPARE(window->property("editorFontPixelSize").toInt(), 21);
+        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 21);
+        QCOMPARE(sizeLabel->property("text").toString(), QStringLiteral("21"));
+
+        backend.setTextScale(16.0 / 12.0);
+        QCOMPARE(window->property("editorFontPixelSize").toInt(), 28);
+        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 28);
+        QCOMPARE(sizeLabel->property("text").toString(), QStringLiteral("21"));
+
+        QVERIFY(QMetaObject::invokeMethod(decrease, "clicked"));
+        QCOMPARE(backend.editorFontSize(), 20);
+        QCOMPARE(window->property("editorFontPixelSize").toInt(), 27);
+
+        backend.setEditorFontSize(20);
+        backend.setTextScale(1.0);
+    }
+
+    void editorLineHeightTracksFontSize() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        backend.setEditorFontSize(20);
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QVERIFY(editor->setProperty("text", QStringLiteral("Hello\nworld")));
+
+        auto *quickDocument = qobject_cast<QQuickTextDocument *>(
+            editor->property("textDocument").value<QObject *>());
+        QVERIFY(quickDocument);
+        QTextDocument *document = quickDocument->textDocument();
+        QVERIFY(document);
+        QVERIFY(document->documentLayout());
+
+        const qreal heightAt20 =
+            document->documentLayout()->blockBoundingRect(document->begin()).height();
+        QVERIFY(heightAt20 > 0);
+
+        backend.setEditorFontSize(10);
+        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 10);
+        const qreal heightAt10 =
+            document->documentLayout()->blockBoundingRect(document->begin()).height();
+        QVERIFY(heightAt10 < heightAt20 * 0.7);
+        QVERIFY(heightAt10 > heightAt20 * 0.35);
+
+        backend.setEditorFontSize(20);
     }
 
     void remembersLastSaveDirectory() {

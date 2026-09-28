@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDesktopServices>
+#include <QFont>
 #include <QGuiApplication>
 #include <QMimeData>
 #include <QProcess>
@@ -33,8 +34,25 @@
 
 #include "markdownhighlighter.h"
 
+namespace {
 constexpr qreal typoraLineHeightPercent = 140;
+constexpr int defaultEditorFontSize = 20;
+constexpr int minEditorFontSize = 10;
+constexpr int maxEditorFontSize = 48;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
+const QString editorFontSizeSetting = QStringLiteral("editor/fontSize");
+
+QTextBlockFormat editorBlockFormatForSize(int pixelSize) {
+    QTextBlockFormat blockFormat;
+    // Typora's 140% is 1.4em — a percentage of font-size, not of the font's
+    // own lineSpacing (ascent + descent + leading). Hinted leading does not
+    // shrink with the editor −/+ control, so ProportionalHeight looked like
+    // huge gaps at small sizes. Pin the line box to the rendered pixel size.
+    const qreal linePx = qMax(1.0, qreal(pixelSize) * typoraLineHeightPercent / 100.0);
+    blockFormat.setLineHeight(linePx, QTextBlockFormat::FixedHeight);
+    return blockFormat;
+}
+}
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
     QString candidate = clipboardText.trimmed();
@@ -117,6 +135,10 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                 emit externalChangeDetected(deleted, m_modified);
             });
 
+    m_editorFontSize = qBound(minEditorFontSize,
+        QSettings().value(editorFontSizeSetting, defaultEditorFontSize).toInt(),
+        maxEditorFontSize);
+
     loadOmarchyTheme();
     watchOmarchyTheme();
     connect(&m_themeWatcher, &QFileSystemWatcher::fileChanged, this, [this]() {
@@ -164,6 +186,22 @@ void Backend::setTextScale(qreal textScale) {
 
     m_textScale = textScale;
     emit textScaleChanged();
+    syncEditorTypography();
+}
+
+void Backend::setEditorFontSize(int editorFontSize) {
+    const int clamped = qBound(minEditorFontSize, editorFontSize, maxEditorFontSize);
+    if (m_editorFontSize == clamped)
+        return;
+
+    m_editorFontSize = clamped;
+    QSettings().setValue(editorFontSizeSetting, m_editorFontSize);
+    emit editorFontSizeChanged();
+    syncEditorTypography();
+}
+
+void Backend::adjustEditorFontSize(int steps) {
+    setEditorFontSize(m_editorFontSize + steps);
 }
 
 void Backend::attachDocument(QObject *textDocument) {
@@ -190,7 +228,7 @@ void Backend::attachDocument(QObject *textDocument) {
                 m_lastChangeAdded = charsAdded;
             });
 
-    applyDocumentTypography();
+    syncEditorTypography();
     restoreRecovery();
 }
 
@@ -722,8 +760,7 @@ void Backend::applyDocumentTypography() {
     if (!m_document)
         return;
 
-    QTextBlockFormat blockFormat;
-    blockFormat.setLineHeight(typoraLineHeightPercent, QTextBlockFormat::ProportionalHeight);
+    const QTextBlockFormat blockFormat = editorBlockFormatForSize(renderedEditorFontSize());
 
     // A full pass is only used for freshly loaded/attached documents, so it is
     // safe to drop undo history here (re-enabling clears the stack anyway).
@@ -745,8 +782,7 @@ void Backend::reapplyTypographyToChange() {
     if (!m_document)
         return;
 
-    QTextBlockFormat blockFormat;
-    blockFormat.setLineHeight(typoraLineHeightPercent, QTextBlockFormat::ProportionalHeight);
+    const QTextBlockFormat blockFormat = editorBlockFormatForSize(renderedEditorFontSize());
 
     // Format only the block(s) touched by the last edit instead of the whole
     // document, and fold the change into the preceding edit command so a single
@@ -763,4 +799,23 @@ void Backend::reapplyTypographyToChange() {
     cursor.mergeBlockFormat(blockFormat);
     cursor.endEditBlock();
     m_formattingTypography = false;
+}
+
+int Backend::renderedEditorFontSize() const {
+    return qMax(1, qRound(qreal(m_editorFontSize) * m_textScale));
+}
+
+void Backend::syncEditorTypography() {
+    if (!m_document)
+        return;
+
+    QFont font(QStringLiteral("iA Writer Mono S"));
+    font.setPixelSize(renderedEditorFontSize());
+    font.setWeight(QFont::Normal);
+    if (m_document->defaultFont() != font)
+        m_document->setDefaultFont(font);
+
+    applyDocumentTypography();
+    if (m_highlighter)
+        m_highlighter->refreshFormats();
 }

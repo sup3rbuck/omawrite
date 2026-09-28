@@ -23,9 +23,10 @@ ApplicationWindow {
     readonly property color selectionFill: backend.themeSelection
     // The desktop's text size knob (GNOME's text-scaling-factor, which
     // `omarchy display text size` drives) anchored so its 12px default leaves
-    // the app at the sizes it was designed around.
+    // the app at the sizes it was designed around. Editor text then applies
+    // the footer −/+ preference on top of that baseline.
     readonly property real textScale: backend.textScale
-    readonly property int editorFontPixelSize: scaledSize(20)
+    readonly property int editorFontPixelSize: scaledSize(backend.editorFontSize)
     readonly property int editorWidth: Math.min(
         Math.round(writerFontMetrics.averageCharacterWidth * 65),
         Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20)))
@@ -85,6 +86,10 @@ ApplicationWindow {
         return Math.max(1, Math.round(pixels * win.textScale));
     }
 
+    function adjustEditorFontSize(steps) {
+        backend.adjustEditorFontSize(steps);
+    }
+
     function toggleFullScreen() {
         win.visibility = win.visibility === Window.FullScreen
             ? Window.Windowed
@@ -135,6 +140,18 @@ ApplicationWindow {
         searchUpdating = false;
         replaceOpen = false;
         editor.forceActiveFocus();
+    }
+
+    Shortcut {
+        sequences: ["Ctrl+-", "Ctrl+_"]
+        context: Qt.ApplicationShortcut
+        onActivated: win.adjustEditorFontSize(-1)
+    }
+
+    Shortcut {
+        sequences: ["Ctrl+=", "Ctrl++"]
+        context: Qt.ApplicationShortcut
+        onActivated: win.adjustEditorFontSize(1)
     }
 
     Shortcut {
@@ -331,7 +348,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nCtrl+-  Smaller text\nCtrl+=  Larger text\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -834,16 +851,55 @@ ApplicationWindow {
             }
         }
 
-        Label {
+        Row {
+            id: footerMeta
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.rightMargin: 12
             anchors.bottomMargin: 10
-            text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
-            color: win.mutedColor
+            spacing: 14
             opacity: 0.75
-            font.family: "iA Writer Mono S"
-            font.pixelSize: win.scaledSize(11)
+
+            Row {
+                spacing: 8
+                height: 16
+
+                FooterIconButton {
+                    objectName: "decreaseFontButton"
+                    iconName: "minus"
+                    iconColor: win.mutedColor
+                    tooltip: "Smaller text"
+                    onClicked: win.adjustEditorFontSize(-1)
+                }
+
+                Label {
+                    objectName: "editorFontSizeLabel"
+                    text: backend.editorFontSize.toString()
+                    color: win.mutedColor
+                    font.family: "iA Writer Mono S"
+                    font.pixelSize: win.scaledSize(11)
+                    height: 16
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                FooterIconButton {
+                    objectName: "increaseFontButton"
+                    iconName: "plus"
+                    iconColor: win.mutedColor
+                    tooltip: "Larger text"
+                    onClicked: win.adjustEditorFontSize(1)
+                }
+            }
+
+            Label {
+                text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
+                color: win.mutedColor
+                font.family: "iA Writer Mono S"
+                font.pixelSize: win.scaledSize(11)
+                height: 16
+                verticalAlignment: Text.AlignVCenter
+            }
         }
 
 
